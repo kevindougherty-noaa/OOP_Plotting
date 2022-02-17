@@ -12,7 +12,7 @@ __all__ = ['CreateFigure', 'CreatePlot']
 class CreateFigure:
 
     def __init__(self, nrows=1, ncols=1, figsize=(8, 6),
-                 sharex=False, sharey=False, projection=None):
+                 sharex=False, sharey=False):
 
         self.nrows = nrows
         self.ncols = ncols
