@@ -1,6 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
 from scipy.interpolate import interpn
+from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 
 __all__ = ['CreateFigure', 'CreatePlot']
 
@@ -8,7 +12,7 @@ __all__ = ['CreateFigure', 'CreatePlot']
 class CreateFigure:
 
     def __init__(self, nrows=1, ncols=1, figsize=(8, 6),
-                 sharex=False, sharey=False):
+                 sharex=False, sharey=False, projection=None):
 
         self.nrows = nrows
         self.ncols = ncols
@@ -27,11 +31,7 @@ class CreateFigure:
             raise ValueError(
                 'Number of plots does not match the number inputted rows'
                 'and columns.')
-        
-        # Create figure and axes
-        self.fig, self.axes = plt.subplots(self.nrows, self.ncols, figsize=self.figsize,
-                                 sharex=self.sharex, sharey=self.sharey)
-        # Plotting dictionary
+
         plot_dict = {
             'scatter': self._scatter,
             'histogram': self._histogram,
@@ -39,9 +39,55 @@ class CreateFigure:
             'vertical_line': self._verticalline,
             'horizontal_line': self._horizontalline,
             'bar_plot': self._barplot,
-            'horizontal_bar': self._hbar
+            'horizontal_bar': self._hbar,
+            'map_scatter': self._map_scatter,
+            'map_gridded': self._map_gridded,
+            'map_contour': self._map_contour
         }
-        # Feature dictionary
+
+        gs = gridspec.GridSpec(self.nrows, self.ncols)
+        self.fig = plt.figure(figsize=self.figsize)
+
+        for i in range(0, self.nrows*self.ncols):
+            # Grab correctly indexed plot object
+            plot_obj = self.plot_list[i]
+
+            # check if object has projection and domain attributes to determine ax
+            if hasattr(plot_obj, 'projection') and hasattr(plot_obj, 'domain'):
+                self.domain = Domain(plot_obj.domain)
+                self.projection = MapProjection(plot_obj.projection)
+
+                # Set up axis specific things
+                ax = plt.subplot(gs[i], projection=self.projection.projection)
+                if str(self.projection) not in ['npstere', 'spstere']:
+                    ax.set_extent(self.domain.extent)
+                    if str(self.projection) not in ['lamconf']:
+                        ax.set_xticks(self.domain.xticks, crs=ccrs.PlateCarree())
+                        ax.set_yticks(self.domain.yticks, crs=ccrs.PlateCarree())
+                        lon_formatter = LongitudeFormatter(zero_direction_label=False)
+                        lat_formatter = LatitudeFormatter()
+                        ax.xaxis.set_major_formatter(lon_formatter)
+                        ax.yaxis.set_major_formatter(lat_formatter)
+
+            else:
+                ax = plt.subplot(gs[i])
+
+            # Loop through plot layers
+            for layer in plot_obj.plot_layers:
+                plot_dict[layer.plottype](layer, ax)
+
+            # loop through all keys in an object and then call approriate
+            # method to plot the feature on the axis
+            for feat in vars(plot_obj).keys():
+                self._plot_features(plot_obj, feat, ax)
+
+            if self.sharex:
+                self._sharex(ax)
+            if self.sharey:
+                self._sharey(ax)
+
+    def _plot_features(self, plot_obj, feature, ax):
+
         feature_dict = {
             'title': self._plot_title,
             'xlabel': self._plot_xlabel,
@@ -59,30 +105,61 @@ class CreateFigure:
             'yticklabels': self._set_yticklabels,
             'invert_xaxis': self._invert_xaxis,
             'invert_yaxis': self._invert_yaxis,
-            'yscale': self._set_yscale
+            'yscale': self._set_yscale,
+            'map_features': self._add_map_features
         }
 
-        try:
-            axes = self.axes.flatten()
-        except AttributeError:
-            axes = [self.axes]
+        if feature in feature_dict:
+            feature_dict[feature](ax, vars(plot_obj)[feature])
 
-        #Loop through axis:
-        for i, ax in enumerate(axes):
-            # Grab correctly indexed plot object
-            plot_obj = self.plot_list[i]
+    def _map_scatter(self, plotobj, ax):
 
-            # Loop through plot layers
-            for layer in plot_obj.plot_layers:
-                plot_dict[layer.plottype](layer, ax)
+        if plotobj.data is None:
+            skipvars = ['plottype', 'longitude', 'latitude',
+                        'markersize']
+            inputs = self._get_inputs_dict(skipvars, plotobj)
 
-            # loop through all keys in an object and then call approriate
-            # method to plot the feature on the axis
-            for feat in vars(plot_obj).keys():
-                if feat in feature_dict:
-                    feature_dict[feat](ax, vars(plot_obj)[feat])
+            cs = ax.scatter(plotobj.longitude, plotobj.latitude,
+                            s=plotobj.markersize, **inputs,
+                            transform=self.projection.projection)
+        else:
+            skipvars = ['plottype', 'longitude', 'latitude',
+                        'data', 'markersize']
+            inputs = self._get_inputs_dict(skipvars, plotobj)
+            cs = ax.scatter(plotobj.longitude, plotobj.latitude,
+                            c=plotobj.data, s=plotobj.markersize,
+                            **inputs, transform=self.projection.projection)
+#         if plotobj.colorbar:
+#             self.cs = cs
 
-        self.fig.tight_layout()
+    def _map_gridded(self, plotobj, ax):
+
+        skipvars = ['plottype', 'longitude', 'latitude',
+                    'markersize']
+        inputs = self._get_inputs_dict(skipvars, plotobj)
+
+        cs = ax.pcolormesh(plotobj.latitude, plotobj.longitude,
+                           plotobj.data, **inputs,
+                           transform=self.projection.projection)
+
+#         if plotobj.colorbar:
+#             self.cs = cs
+
+    def _map_contour(self, plotobj, ax):
+
+        skipvars = ['plottype', 'longitude', 'latitude',
+                    'markersize']
+        inputs = self._get_inputs_dict(skipvars, plotobj)
+
+        cs = ax.contour(plotobj.longitude, plotobj.latitude,
+                        plot.data, **inputs,
+                        transform=self.projection.projection)
+
+        if plotobj.clabel:
+            plt.clabel(cs, levels=plotobj.levels, use_clabeltext=True)
+
+#         if plotobj.colorbar:
+#             self.cs = cs
 
     def _density_scatter(self, plotobj, ax):
         """
@@ -123,13 +200,12 @@ class CreateFigure:
         # checks to see if density attribute is True
         if hasattr(plotobj, 'density'):
             self._density_scatter(plotobj, ax)
-
         else:
             skipvars = ['plottype', 'plot_ax', 'x', 'y',
                         'markersize', 'linear_regression',
                         'density']
             inputs = self._get_inputs_dict(skipvars, plotobj)
-            
+
             s = ax.scatter(plotobj.x, plotobj.y, s=plotobj.markersize,
                            **inputs)
 
@@ -253,7 +329,7 @@ class CreateFigure:
                 cb = self.fig.colorbar(self.cs, cax=axins,
                                        orientation=colorbar['orientation'],
                                        **colorbar['kwargs'])
-        
+
         cb.set_label(colorbar['label'], fontsize=colorbar['fontsize'])
 
     def _plot_stats(self, ax, stats):
@@ -289,7 +365,10 @@ class CreateFigure:
         """
         Add grid on specified ax.
         """
-        ax.grid(**grid)
+        try:
+            ax.gridlines(crs=ccrs.PlateCarree(), **grid)
+        except AttributeError:
+            ax.grid(**grid)
 
     def _set_xlim(self, ax, xlim):
         """
@@ -307,13 +386,23 @@ class CreateFigure:
         """
         Set x-ticks on specified ax.
         """
-        ax.set_xticks(**xticks)
+        try:
+            ax.set_xticks(**xticks, crs=ccrs.PlateCarree())
+            lon_formatter = LongitudeFormatter(zero_direction_label=True)
+            lat_formatter = LatitudeFormatter()
+            ax.xaxis.set_major_formatter(lon_formatter)
+            ax.yaxis.set_major_formatter(lat_formatter)
+        except AttributeError:
+            ax.set_xticks(**xticks)
 
     def _set_yticks(self, ax, yticks):
         """
         Set y-ticks on specified ax.
         """
-        ax.set_yticks(**yticks)
+        try:
+            ax.set_yticks(**yticks, crs=ccrs.PlateCarree())
+        except AttributeError:
+            ax.set_yticks(**yticks)
 
     def _set_xticklabels(self, ax, xticklabels):
         """
@@ -361,21 +450,110 @@ class CreateFigure:
         """
         ax.set_yscale(yscale)
 
+    def _sharex(self, ax):
+        """
+        If sharex axis is True, will find where to hide xticklabels.
+        """
+        if ax.is_last_row():
+            pass
+        else:
+            plt.setp(ax.get_xticklabels(), visible=False)
+
+    def _sharey(self, ax):
+        """
+        If sharey axis is True, will find where to hide yticklabels.
+        """
+        if ax.is_first_col():
+            pass
+        else:
+            plt.setp(ax.get_yticklabels(), visible=False)
+
+    def _add_map_features(self, ax, map_features):
+        """
+        Factory to add map features.
+        """
+        feature_dict = {
+            'coastlines': self._add_coastlines,
+            'borders': self._add_borders,
+            'states': self._add_states,
+            'lakes': self._add_lakes,
+            'rivers': self._add_rivers,
+            'land': self._add_land,
+            'ocean': self._add_ocean
+        }
+
+        for feat in map_features:
+            try:
+                feature_dict[feat](ax)
+            except KeyError:
+                raise TypeError(f'{feat} is not a valid map feature.' +
+                                'Current map features supported are:\n' +
+                                f'{" | ".join(feature_dict.keys())}"')
+
+    def _add_coastlines(self, ax):
+        """
+        Add coastline to map axes. (Only feature that currently works)
+        """
+        ax.add_feature(cfeature.COASTLINE)
+
+    def _add_borders(self, ax):
+        """
+        Add country borders to map axes.
+        """
+        ax.add_feature(cfeature.BORDERS)
+
+    def _add_states(self, ax):
+        """
+        Add state borders to map axes.
+        """
+        ax.add_feature(cfeature.STATES)
+
+    def _add_lakes(self, ax):
+        """
+        Add lakes to map axes.
+        """
+        ax.add_feature(cfeature.LAKES)
+
+    def _add_rivers(self, ax):
+        """
+        Add rivers to map axes.
+        """
+        ax.add_feature(cfeature.RIVERS)
+
+    def _add_land(self, ax):
+        """
+        Add land to map axes.
+        """
+        ax.add_feature(cfeature.LAND)
+
+    def _add_ocean(self, ax):
+        """
+        Add ocean to map axes.
+        """
+        ax.add_feature(cfeature.OCEAN)
+
 
 class CreatePlot():
     """
     Creates a figure to plot data as a scatter plot,
     histogram, or line plot.
     """
-
-    def __init__(self, plot_layers=[]):
+    def __init__(self, plot_layers=[], projection=None,
+                 domain=None):
 
         self.plot_layers = plot_layers
+
+        ###############################################
+        # Need a better way of doing this
+        if projection is not None and domain is not None:
+            self.projection = projection
+            self.domain = domain
+        ###############################################
 
     def add_title(self, label, loc='center',
                   pad=None, **kwargs):
 
-        self.title = {    
+        self.title = {
             'label': label,
             'loc': loc,
             'pad': pad,
@@ -445,6 +623,10 @@ class CreatePlot():
         self.grid = {
             **kwargs
         }
+
+    def add_map_features(self, feature_list=['coastlines']):
+
+        self.map_features = feature_list
 
     def set_xlim(self, left=None, right=None):
 
