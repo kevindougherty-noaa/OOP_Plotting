@@ -5,6 +5,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from scipy.interpolate import interpn
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
+from plots.map_tools import Domain, MapProjection
 
 __all__ = ['CreateFigure', 'CreatePlot']
 
