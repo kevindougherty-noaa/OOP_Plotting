@@ -6,6 +6,7 @@ import cartopy.feature as cfeature
 from scipy.interpolate import interpn
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 from plots.map_tools import Domain, MapProjection
+from stats import get_linear_regression
 
 __all__ = ['CreateFigure', 'CreatePlot']
 
@@ -49,9 +50,7 @@ class CreateFigure:
         gs = gridspec.GridSpec(self.nrows, self.ncols)
         self.fig = plt.figure(figsize=self.figsize)
 
-        for i in range(0, self.nrows*self.ncols):
-            # Grab correctly indexed plot object
-            plot_obj = self.plot_list[i]
+        for i, plot_obj in enumerate(self.plot_list):
 
             # check if object has projection and domain attributes to determine ax
             if hasattr(plot_obj, 'projection') and hasattr(plot_obj, 'domain'):
@@ -86,6 +85,15 @@ class CreateFigure:
                 self._sharex(ax)
             if self.sharey:
                 self._sharey(ax)
+                
+        gs.tight_layout(self.fig)
+        
+    def add_suptitle(self, text, **kwargs):
+        """
+        Add super title to figure. Useful for subplots.
+        """
+        if hasattr(self, 'fig'):
+            self.fig.suptitle(text, **kwargs)
 
     def _plot_features(self, plot_obj, feature, ax):
 
@@ -455,18 +463,14 @@ class CreateFigure:
         """
         If sharex axis is True, will find where to hide xticklabels.
         """
-        if ax.is_last_row():
-            pass
-        else:
+        if not ax.is_last_row():
             plt.setp(ax.get_xticklabels(), visible=False)
 
     def _sharey(self, ax):
         """
         If sharey axis is True, will find where to hide yticklabels.
         """
-        if ax.is_first_col():
-            pass
-        else:
+        if not ax.is_first_col():
             plt.setp(ax.get_yticklabels(), visible=False)
 
     def _add_map_features(self, ax, map_features):
@@ -474,64 +478,22 @@ class CreateFigure:
         Factory to add map features.
         """
         feature_dict = {
-            'coastlines': self._add_coastlines,
-            'borders': self._add_borders,
-            'states': self._add_states,
-            'lakes': self._add_lakes,
-            'rivers': self._add_rivers,
-            'land': self._add_land,
-            'ocean': self._add_ocean
+            'coastline': cfeature.COASTLINE,
+            'borders': cfeature.BORDERS,
+            'states': cfeature.STATES,
+            'lakes': cfeature.LAKES,
+            'rivers': cfeature.RIVERS,
+            'land': cfeature.LAND,
+            'ocean': cfeature.OCEAN
         }
 
         for feat in map_features:
             try:
-                feature_dict[feat](ax)
+                ax.add_feature(feature_dict[feat])
             except KeyError:
                 raise TypeError(f'{feat} is not a valid map feature.' +
                                 'Current map features supported are:\n' +
                                 f'{" | ".join(feature_dict.keys())}"')
-
-    def _add_coastlines(self, ax):
-        """
-        Add coastline to map axes. (Only feature that currently works)
-        """
-        ax.add_feature(cfeature.COASTLINE)
-
-    def _add_borders(self, ax):
-        """
-        Add country borders to map axes.
-        """
-        ax.add_feature(cfeature.BORDERS)
-
-    def _add_states(self, ax):
-        """
-        Add state borders to map axes.
-        """
-        ax.add_feature(cfeature.STATES)
-
-    def _add_lakes(self, ax):
-        """
-        Add lakes to map axes.
-        """
-        ax.add_feature(cfeature.LAKES)
-
-    def _add_rivers(self, ax):
-        """
-        Add rivers to map axes.
-        """
-        ax.add_feature(cfeature.RIVERS)
-
-    def _add_land(self, ax):
-        """
-        Add land to map axes.
-        """
-        ax.add_feature(cfeature.LAND)
-
-    def _add_ocean(self, ax):
-        """
-        Add ocean to map axes.
-        """
-        ax.add_feature(cfeature.OCEAN)
 
 
 class CreatePlot():
@@ -625,7 +587,7 @@ class CreatePlot():
             **kwargs
         }
 
-    def add_map_features(self, feature_list=['coastlines']):
+    def add_map_features(self, feature_list=['coastline']):
 
         self.map_features = feature_list
 
